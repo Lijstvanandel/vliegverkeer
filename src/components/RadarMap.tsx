@@ -504,6 +504,7 @@ export const RadarMap: React.FC<RadarMapProps> = ({
       center: [boundary.properties.centroid_lon, boundary.properties.centroid_lat],
       zoom: 10.6,
       attributionControl: false,
+      fadeDuration: 0,
     });
 
     map.addControl(new NavigationControl({ showCompass: true }), 'bottom-right');
@@ -513,6 +514,7 @@ export const RadarMap: React.FC<RadarMapProps> = ({
       closeOnClick: false,
       offset: 16,
       maxWidth: '280px',
+      className: 'pointer-events-none',
     });
     popupRef.current = popup;
 
@@ -806,10 +808,23 @@ export const RadarMap: React.FC<RadarMapProps> = ({
         },
       });
 
-      // 3. Vliegtuigen & Helikopters Symboollaag
+      // 3. Vliegtuigen & Helikopters: stabiele feature IDs + gescheiden hit-, icoon- en labellaag (geen collision-knipperen)
       map.addSource('aircraft-source', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
+        promoteId: 'passage_id',
+      });
+
+      map.addLayer({
+        id: 'aircraft-hit-layer',
+        type: 'circle',
+        source: 'aircraft-source',
+        paint: {
+          'circle-radius': ['case', ['==', ['get', 'selected'], 1], 24, 20],
+          'circle-color': '#000000',
+          'circle-opacity': 0.001,
+          'circle-stroke-width': 0,
+        },
       });
 
       map.addLayer({
@@ -826,7 +841,28 @@ export const RadarMap: React.FC<RadarMapProps> = ({
       });
 
       map.addLayer({
-        id: 'aircraft-layer',
+        id: 'aircraft-label-layer',
+        type: 'symbol',
+        source: 'aircraft-source',
+        layout: {
+          'text-field': ['get', 'label'],
+          'text-font': ['Noto Sans Regular'],
+          'text-size': 11,
+          'text-offset': [0, 1.5],
+          'text-anchor': 'top',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+          'text-optional': true,
+        },
+        paint: {
+          'text-color': '#f5f6f4',
+          'text-halo-color': '#060e0a',
+          'text-halo-width': 1.6,
+        },
+      });
+
+      map.addLayer({
+        id: 'aircraft-icon-layer',
         type: 'symbol',
         source: 'aircraft-source',
         layout: {
@@ -836,40 +872,17 @@ export const RadarMap: React.FC<RadarMapProps> = ({
           'icon-rotation-alignment': 'map',
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,
-          'text-field': ['get', 'label'],
-          'text-font': ['Noto Sans Regular'],
-          'text-size': 11,
-          'text-offset': [0, 1.5],
-          'text-anchor': 'top',
-          'text-allow-overlap': false,
         },
         paint: {
           'icon-color': ['get', 'icon_color'],
           'icon-halo-color': '#060e0a',
           'icon-halo-width': 1.5,
-          'text-color': '#f5f6f4',
-          'text-halo-color': '#060e0a',
-          'text-halo-width': 1.6,
         },
       });
 
       map.fitBounds(bounds, { padding: 48, maxZoom: 12, duration: 0 });
 
-      map.on('mouseenter', 'aircraft-layer', (e: MapLayerMouseEvent) => {
-        map.getCanvas().style.cursor = 'pointer';
-        heatmapPopup.remove();
-        const hoverCellSrc = map.getSource('heatmap-hover-cell-source') as
-          | GeoJSONSource
-          | undefined;
-        if (hoverCellSrc) {
-          hoverCellSrc.setData({ type: 'FeatureCollection', features: [] } as any);
-        }
-        const feature = e.features?.[0];
-        if (!feature) return;
-        const props: any = feature.properties || {};
-        hoveredPassageIdRef.current = props.passage_id ? String(props.passage_id) : null;
-        const coords = (feature.geometry as any).coordinates.slice();
-
+      const buildAircraftPopupHtml = (props: any) => {
         const routeBadge = props.route_text
           ? `<div style="margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#38bdf8;font-weight:700;">${props.route_text}</div>`
           : '';
@@ -883,10 +896,7 @@ export const RadarMap: React.FC<RadarMapProps> = ({
             ? `<div style="margin-top:4px;padding:2px 6px;border-radius:3px;background:rgba(245,158,11,0.16);border:1px solid rgba(245,158,11,0.45);font-size:10px;color:#fbbf24;font-weight:700;">NADERT vanuit ${props.neighbor_municipality || 'buurgemeente'}${props.eta_seconds ? ` (~${props.eta_seconds}s)` : ''} · Nog niet in meting</div>`
             : '';
 
-        popup
-          .setLngLat(coords)
-          .setHTML(
-            `<div style="padding:8px 10px;font-family:'Inter',sans-serif;font-variant-numeric:tabular-nums;">
+        return `<div style="padding:8px 10px;font-family:'Inter',sans-serif;font-variant-numeric:tabular-nums;">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
                 <span style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#fbbf24;font-size:12px;">${props.callsign}</span>
                 ${mlatBadge}
@@ -898,12 +908,42 @@ export const RadarMap: React.FC<RadarMapProps> = ({
                 <span style="color:#9bb0a4;">Snelheid: ${props.gs_text}</span>
               </div>
               ${routeBadge}
-            </div>`
-          )
+            </div>`;
+      };
+
+      const handleAircraftHover = (e: MapLayerMouseEvent) => {
+        map.getCanvas().style.cursor = 'pointer';
+        heatmapPopup.remove();
+        const hoverCellSrc = map.getSource('heatmap-hover-cell-source') as
+          | GeoJSONSource
+          | undefined;
+        if (hoverCellSrc) {
+          hoverCellSrc.setData({ type: 'FeatureCollection', features: [] } as any);
+        }
+        const feature = e.features?.[0];
+        if (!feature) return;
+        const props: any = feature.properties || {};
+        const pid = props.passage_id ? String(props.passage_id) : null;
+        hoveredPassageIdRef.current = pid;
+        const coords = (feature.geometry as any).coordinates.slice();
+
+        popup
+          .setLngLat(coords)
+          .setHTML(buildAircraftPopupHtml(props))
           .addTo(map);
+      };
+
+      map.on('mouseenter', 'aircraft-hit-layer', handleAircraftHover);
+      map.on('mousemove', 'aircraft-hit-layer', (e: MapLayerMouseEvent) => {
+        const feature = e.features?.[0];
+        if (!feature) return;
+        const pid = feature.properties?.passage_id ? String(feature.properties.passage_id) : null;
+        if (pid !== hoveredPassageIdRef.current || !popup.isOpen()) {
+          handleAircraftHover(e);
+        }
       });
 
-      map.on('mouseleave', 'aircraft-layer', () => {
+      map.on('mouseleave', 'aircraft-hit-layer', () => {
         map.getCanvas().style.cursor = '';
         hoveredPassageIdRef.current = null;
         popup.remove();
@@ -1007,19 +1047,21 @@ export const RadarMap: React.FC<RadarMapProps> = ({
         }
       });
 
-      map.on('click', 'aircraft-layer', (e: MapLayerMouseEvent) => {
-        const feature = e.features?.[0];
-        const pid = feature?.properties?.passage_id;
-        if (pid) {
-          onSelectRef.current(String(pid));
+      map.on('click', (e: MapLayerMouseEvent) => {
+        const aircraftHits = map.queryRenderedFeatures(e.point, {
+          layers: ['aircraft-hit-layer', 'aircraft-icon-layer', 'aircraft-label-layer'],
+        });
+        const acPid = aircraftHits[0]?.properties?.passage_id;
+        if (acPid) {
+          onSelectRef.current(String(acPid));
+          return;
         }
-      });
-
-      map.on('click', 'tracks-layer', (e: MapLayerMouseEvent) => {
-        const feature = e.features?.[0];
-        const pid = feature?.properties?.passage_id;
-        if (pid) {
-          onSelectRef.current(String(pid));
+        const trackHits = map.queryRenderedFeatures(e.point, {
+          layers: ['tracks-layer'],
+        });
+        const trPid = trackHits[0]?.properties?.passage_id;
+        if (trPid) {
+          onSelectRef.current(String(trPid));
         }
       });
 
@@ -1050,35 +1092,62 @@ export const RadarMap: React.FC<RadarMapProps> = ({
     }
   }, [boundary, adjacentBoundaries, mapReady]);
 
-  // Direct muteren van MapLibre GeoJSON bronnen in History-modus (tijdbalk-gestuurd)
+  // Wis naderende buurgemeente-sporen eenmalig bij wisselen naar historie-modus
   useEffect(() => {
-    if (!mapReady || !mapRef.current || mode !== 'history' || !historySnapshot) return;
+    if (!mapReady || !mapRef.current || mode !== 'history') return;
     smoothStateRef.current.clear();
-
-    const trackSrc = mapRef.current.getSource('tracks-source') as GeoJSONSource | undefined;
     const appTrackSrc = mapRef.current.getSource('approaching-tracks-source') as
       | GeoJSONSource
       | undefined;
+    if (appTrackSrc) {
+      appTrackSrc.setData({ type: 'FeatureCollection', features: [] } as any);
+    }
+  }, [mode, mapReady]);
+
+  // Direct muteren van MapLibre GeoJSON bronnen in History-modus (tijdbalk-gestuurd)
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || mode !== 'history' || !historySnapshot) return;
+
+    const trackSrc = mapRef.current.getSource('tracks-source') as GeoJSONSource | undefined;
     const acSrc = mapRef.current.getSource('aircraft-source') as GeoJSONSource | undefined;
 
     if (trackSrc) trackSrc.setData(historySnapshot.tracksGeoJson as any);
-    if (appTrackSrc) appTrackSrc.setData(historySnapshot.approachingTracksGeoJson as any);
     if (acSrc) acSrc.setData(historySnapshot.aircraftGeoJson as any);
+
+    const hoveredId = hoveredPassageIdRef.current;
+    if (hoveredId && popupRef.current?.isOpen()) {
+      const feat = historySnapshot.aircraftGeoJson.features.find(
+        (f: any) => f.properties?.passage_id === hoveredId
+      );
+      if (feat) {
+        popupRef.current.setLngLat((feat.geometry as any).coordinates);
+      } else {
+        hoveredPassageIdRef.current = null;
+        popupRef.current.remove();
+      }
+    }
   }, [mode, historySnapshot, mapReady]);
 
-  // 60 fps Live snelheids-gebaseerde animatieloop (geen React re-renders per frame!)
+  // Vloeiende ~30 fps Live snelheids-gebaseerde animatieloop (geen React re-renders per frame!)
   useEffect(() => {
     if (!mapReady || !mapRef.current || mode !== 'live') return;
 
     let rafId = 0;
     let prevRafTs = 0;
+    let lastCommitTs = 0;
 
     const tick = (rafTs: number) => {
       const m = mapRef.current;
       if (!m) return;
 
-      const dtFrameSec = prevRafTs > 0 ? Math.min(0.1, (rafTs - prevRafTs) / 1000) : 0;
+      if (lastCommitTs !== 0 && rafTs - lastCommitTs < 32) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+
+      const dtFrameSec = prevRafTs > 0 ? Math.min(0.15, (rafTs - prevRafTs) / 1000) : 0;
       prevRafTs = rafTs;
+      lastCommitTs = rafTs;
 
       const inputs = liveInputsRef.current;
       const nowSyncedMs = Date.now() + inputs.clockOffsetMs;

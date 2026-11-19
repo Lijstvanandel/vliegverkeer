@@ -132,7 +132,7 @@ export default function App() {
     refreshKey: historySync.historyVersion,
   });
 
-  // 60 fps requestAnimationFrame loop voor historische tijdlijn
+  // Vloeiende ~30 fps requestAnimationFrame loop voor historische tijdlijn (voorkomt worker-stutter bij 60/120Hz)
   const lastRafRef = useRef<number | null>(null);
   useEffect(() => {
     if (mode !== 'history' || !isPlaying) {
@@ -142,18 +142,23 @@ export default function App() {
 
     let rafId = 0;
     const step = (ts: number) => {
-      if (lastRafRef.current !== null) {
-        const dtMs = Math.min(100, ts - lastRafRef.current);
-        setPlayheadMs((prev) => {
-          const next = prev + dtMs * speed;
-          if (next >= historyRange.endMs) {
-            setIsPlaying(false);
-            return historyRange.endMs;
-          }
-          return next;
-        });
+      if (lastRafRef.current === null) {
+        lastRafRef.current = ts;
+      } else {
+        const elapsed = ts - lastRafRef.current;
+        if (elapsed >= 32) {
+          const dtMs = Math.min(200, elapsed);
+          lastRafRef.current = ts;
+          setPlayheadMs((prev) => {
+            const next = prev + dtMs * speed;
+            if (next >= historyRange.endMs) {
+              setIsPlaying(false);
+              return historyRange.endMs;
+            }
+            return next;
+          });
+        }
       }
-      lastRafRef.current = ts;
       rafId = requestAnimationFrame(step);
     };
 
