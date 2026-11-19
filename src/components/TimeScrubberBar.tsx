@@ -8,6 +8,7 @@ import {
   ChevronRight,
   AlertTriangle,
   Clock,
+  Radio,
 } from 'lucide-react';
 
 interface TimeScrubberBarProps {
@@ -26,6 +27,7 @@ interface TimeScrubberBarProps {
   totalMatched: number;
   truncated: boolean;
   isLoading: boolean;
+  onSwitchToLive?: () => void;
 }
 
 const SPEEDS = [1, 5, 10, 30, 60];
@@ -54,6 +56,7 @@ export const TimeScrubberBar: React.FC<TimeScrubberBarProps> = ({
   totalMatched,
   truncated,
   isLoading,
+  onSwitchToLive,
 }) => {
   // Activiteiten-histogram over 48 tijdbuckets
   const histogram = useMemo(() => {
@@ -147,7 +150,7 @@ export const TimeScrubberBar: React.FC<TimeScrubberBarProps> = ({
           )}
         </div>
 
-        {/* Playhead timestamp */}
+        {/* Playhead timestamp + snelle Live-knop */}
         <div className="flex items-center gap-2 text-xs font-mono">
           {isLoading && (
             <span className="text-[11px] text-[var(--accent-gold)] animate-pulse">
@@ -160,6 +163,18 @@ export const TimeScrubberBar: React.FC<TimeScrubberBarProps> = ({
               {formatDateTimeNL(new Date(playheadMs).toISOString(), true)}
             </span>
           </div>
+          {onSwitchToLive && (
+            <button
+              type="button"
+              onClick={onSwitchToLive}
+              className="font-sans px-2.5 py-1 rounded-[4px] bg-[var(--bg-elevated)] hover:bg-[var(--bg-card-hover)] border border-[var(--status-emerald)]/70 hover:border-[var(--status-emerald)] text-[var(--text-main)] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+              title="Schakel direct terug naar de live situatie (gelogde historie blijft bewaard)"
+            >
+              <span className="w-2 h-2 rounded-full bg-[var(--status-emerald)] animate-pulse shrink-0" />
+              <Radio className="w-3.5 h-3.5 text-[var(--status-emerald)] shrink-0" />
+              <span>Naar Live</span>
+            </button>
+          )}
         </div>
       </div>
 

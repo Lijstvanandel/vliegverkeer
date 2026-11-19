@@ -90,28 +90,30 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
     <header className="bg-[var(--bg-card)] border-b border-[var(--border-subtle)] z-30 select-none shrink-0 flex flex-col">
       {/* Bovenste rij: Huisstijl merk, zoekbalk & globale radaracties */}
       <div className="h-11 px-2.5 md:px-4 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)]/70">
-        {/* Merkblok (Lijst van Andel Dataproduct) */}
+        {/* Merkblok (Onafhankelijk Steenwijkerland Dataproduct) */}
         <div className="flex items-center gap-2.5 min-w-0 shrink-0">
           <a
             href="/"
             target={isEmbed ? '_blank' : undefined}
             rel={isEmbed ? 'noopener noreferrer' : undefined}
-            className="flex items-center gap-2 text-[var(--text-main)] transition-opacity group min-w-0"
+            className="flex items-center gap-2.5 text-[var(--text-main)] transition-opacity group min-w-0"
           >
-            <div className="w-7 h-7 rounded-[4px] bg-[var(--accent-gold)] border border-[var(--accent-gold-bright)] flex items-center justify-center shrink-0">
-              <span className="text-[11px] font-extrabold text-[#060e0a] tracking-tight">LA</span>
-            </div>
+            <img
+              src="/logo-osl.webp"
+              alt="Onafhankelijk Steenwijkerland"
+              className="h-8 w-8 rounded-[4px] bg-[#f5f6f4] p-0.5 object-contain border border-[var(--border-subtle)] shrink-0"
+            />
             <div className="flex flex-col leading-tight min-w-0">
               <div className="flex items-baseline gap-1.5">
                 <span className="text-xs sm:text-sm font-bold tracking-tight text-[var(--text-main)] whitespace-nowrap">
-                  Lijst van Andel
+                  Onafhankelijk Steenwijkerland
                 </span>
                 <span className="text-[11px] text-[var(--accent-gold)] font-semibold hidden xs:inline whitespace-nowrap">
-                  Steenwijkerland
+                  GM1708
                 </span>
               </div>
               <span className="text-[10px] text-[var(--text-muted)] hidden md:inline truncate">
-                Dataproduct · Luchtverkeer Radar (GM1708)
+                Dataproduct van Onafhankelijk Steenwijkerland · Luchtverkeer Radar
               </span>
             </div>
           </a>

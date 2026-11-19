@@ -41,7 +41,7 @@ import {
   latLonToHeatmapCell,
 } from '../lib/heatmap';
 import { getDemoHistoricalSlice } from '../lib/mockData';
-import { Compass, Flame, Layers, Plane, Radio, History, ToggleRight } from 'lucide-react';
+import { Compass, Flame, Layers, Plane, Radio, History, ToggleRight, X } from 'lucide-react';
 
 interface RadarMapProps {
   boundary: MunicipalityBoundaryFeature;
@@ -56,6 +56,7 @@ interface RadarMapProps {
   onSelectPassage: (id: string | null) => void;
   health: IngestionHealth;
   historyVersion?: number;
+  onSwitchToLive?: () => void;
   onSwitchToPreview?: () => void;
   onSwitchToHistory?: () => void;
 }
@@ -171,6 +172,7 @@ export const RadarMap: React.FC<RadarMapProps> = ({
   onSelectPassage,
   health,
   historyVersion = 0,
+  onSwitchToLive,
   onSwitchToPreview,
   onSwitchToHistory,
 }) => {
@@ -182,6 +184,7 @@ export const RadarMap: React.FC<RadarMapProps> = ({
   const [mapReady, setMapReady] = useState(false);
   const [showTracks, setShowTracks] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [emptyCardDismissed, setEmptyCardDismissed] = useState(false);
   const [heatmapData, setHeatmapData] = useState<AllHistoryHeatmapResponse | null>(null);
   const [heatmapLoading, setHeatmapLoading] = useState(false);
   const [hoveredHeatInfo, setHoveredHeatInfo] = useState<{
@@ -1242,6 +1245,10 @@ export const RadarMap: React.FC<RadarMapProps> = ({
     }
   }, [basemap, mapReady]);
 
+  useEffect(() => {
+    setEmptyCardDismissed(false);
+  }, [mode]);
+
   const handleRecenter = () => {
     if (!mapRef.current) return;
     const bounds = computeBoundaryBounds(boundary);
@@ -1388,24 +1395,70 @@ export const RadarMap: React.FC<RadarMapProps> = ({
         )}
       </div>
 
-      {/* Verplichte Lege Radar Statuskaart (Sectie 4.7) */}
-      {visibleCount === 0 && (
+      {/* Linksboven op de kaart: snelle 'Terug naar Live' knop (alleen in historie-modus) + weggeklikte statuspil */}
+      {( (mode === 'history' && onSwitchToLive) || (visibleCount === 0 && emptyCardDismissed) ) && (
+        <div className="absolute top-3 left-3 z-20 flex flex-wrap items-center gap-2 max-w-[calc(100%-150px)]">
+          {mode === 'history' && onSwitchToLive && (
+            <button
+              type="button"
+              onClick={onSwitchToLive}
+              className="px-3 py-1.5 rounded-[5px] bg-[var(--bg-card)]/95 hover:bg-[var(--bg-elevated)] border border-[var(--status-emerald)]/75 hover:border-[var(--status-emerald)] text-[var(--text-main)] text-xs font-bold shadow-xl backdrop-blur-xs flex items-center gap-2 cursor-pointer transition-colors"
+              title="Keer direct terug naar de live situatie (alle gelogde historie blijft behouden)"
+            >
+              <span className="w-2 h-2 rounded-full bg-[var(--status-emerald)] animate-pulse shrink-0" />
+              <Radio className="w-3.5 h-3.5 text-[var(--status-emerald)] shrink-0" />
+              <span>Terug naar Live</span>
+            </button>
+          )}
+
+          {visibleCount === 0 && emptyCardDismissed && (
+            <button
+              type="button"
+              onClick={() => setEmptyCardDismissed(false)}
+              className="px-2.5 py-1.5 rounded-[4px] bg-[var(--bg-card)]/95 hover:bg-[var(--bg-card-hover)] border border-[var(--border-subtle)] hover:border-[var(--border-focus)] text-[11px] font-mono text-[var(--text-muted)] hover:text-[var(--text-main)] shadow-lg flex items-center gap-1.5 cursor-pointer transition-colors"
+              title="Toon radarstatus-melding opnieuw"
+            >
+              <span className="w-2 h-2 rounded-full bg-[var(--status-emerald)] animate-pulse" />
+              <span>
+                {mode === 'live'
+                  ? 'Op dit live moment geen vlucht in GM1708 · wacht op verkeer (10s)'
+                  : 'Geen vlucht op dit tijdstip'}
+              </span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Wegklikbare Lege Radar Statuskaart */}
+      {visibleCount === 0 && !emptyCardDismissed && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-4">
-          <div className="pointer-events-auto max-w-md w-full bg-[var(--bg-card)]/95 border border-[var(--border-subtle)] rounded-[6px] shadow-2xl p-5 backdrop-blur-sm tabular-nums">
-            <div className="flex items-start gap-3">
+          <div className="pointer-events-auto relative max-w-md w-full bg-[var(--bg-card)]/95 border border-[var(--border-subtle)] rounded-[6px] shadow-2xl p-5 backdrop-blur-sm tabular-nums">
+            <button
+              type="button"
+              onClick={() => setEmptyCardDismissed(true)}
+              aria-label="Melding sluiten"
+              title="Melding wegklikken"
+              className="absolute top-3 right-3 p-1 rounded-[4px] bg-[var(--bg-main)] hover:bg-[var(--bg-card-hover)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] cursor-pointer transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+
+            <div className="flex items-start gap-3 pr-6">
               <div className="w-9 h-9 rounded-[4px] bg-[var(--bg-elevated)] border border-[var(--border-focus)] flex items-center justify-center shrink-0">
                 <Plane className="w-4.5 h-4.5 text-[var(--accent-gold)]" />
               </div>
               <div className="min-w-0 flex-1">
                 <h3 className="text-sm font-bold text-[var(--text-main)] tracking-tight">
                   {mode === 'live'
-                    ? 'Momenteel geen vliegtuigen boven Gemeente Steenwijkerland (GM1708)'
-                    : 'Geen toestellen op dit tijdstip in de selectie'}
+                    ? 'Op dit live moment geen vliegtuigen boven Steenwijkerland'
+                    : 'Geen toestellen op dit exacte tijdstip in de selectie'}
                 </h3>
                 <p className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed">
                   {mode === 'live'
-                    ? 'Alleen luchtverkeer dat strikt binnen de gemeentegrens van Steenwijkerland vliegt wordt getoond.'
-                    : 'Verschuif de tijdbalk, kies een breder tijdvak (Dag / Week) of verruim de hoogte- of categoriefilters.'}
+                    ? 'De live radar werkt gewoon door en ververst automatisch elke 10 seconden. Er vliegt alleen op dit precieze moment toevallig geen toestel binnen de gemeentegrens — wacht even af tot een vliegtuig nadert, of bekijk eerder gelogde vluchten in Historie terugkijken.'
+                    : passages.length > 0
+                    ? `Alleen op dit gekozen tijdstip is er niets te zien; in dit tijdvak zijn wél ${passages.length.toLocaleString('nl-NL')} gelogde vluchten aanwezig. Druk op Afspelen, verschuif de tijdbalk of schakel terug naar Live Radar.`
+                    : 'Alleen voor dit tijdvak/filter zijn nu geen vluchten zichtbaar (alles wat eerder is gelogd blijft bewaard). Kies een breder tijdvak (Dag / Week), verruim de filters of schakel naar Live Radar en wacht tot er een toestel passeert.'}
                 </p>
 
                 <div className="mt-3 p-2.5 rounded-[4px] bg-[var(--bg-main)] border border-[var(--border-subtle)] grid grid-cols-2 gap-2 text-[11px] font-mono">
@@ -1453,6 +1506,16 @@ export const RadarMap: React.FC<RadarMapProps> = ({
                       <span>Historie terugkijken</span>
                     </button>
                   )}
+                  {mode === 'history' && onSwitchToLive && (
+                    <button
+                      type="button"
+                      onClick={onSwitchToLive}
+                      className="px-3 py-1.5 rounded-[4px] bg-[var(--bg-elevated)] hover:bg-[var(--bg-card-hover)] border border-[var(--border-focus)] text-[var(--text-main)] text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Radio className="w-3.5 h-3.5 text-[var(--status-emerald)]" />
+                      <span>Terug naar Live Radar</span>
+                    </button>
+                  )}
                   {feedMode === 'live' && onSwitchToPreview && (
                     <button
                       type="button"
@@ -1463,6 +1526,13 @@ export const RadarMap: React.FC<RadarMapProps> = ({
                       <span>Open Preview-modus</span>
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => setEmptyCardDismissed(true)}
+                    className="px-2.5 py-1.5 rounded-[4px] bg-[var(--bg-main)] hover:bg-[var(--bg-card-hover)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    Sluiten
+                  </button>
                 </div>
               </div>
             </div>

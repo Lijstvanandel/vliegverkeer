@@ -492,8 +492,7 @@ export const AirspaceStatsModal: React.FC<AirspaceStatsModalProps> = ({
                 Luchtverkeer Statistieken — Gemeente Steenwijkerland (GM1708)
               </h2>
               <p className="text-xs text-[var(--text-muted)]">
-                Passages, laagst/hoogst gevlogen hoogtes en vluchtroutes · Dataproduct van Lijst van
-                Andel
+                Passages, laagst/hoogst gevlogen hoogtes en vluchtroutes · Dataproduct van Onafhankelijk Steenwijkerland
               </p>
             </div>
           </div>

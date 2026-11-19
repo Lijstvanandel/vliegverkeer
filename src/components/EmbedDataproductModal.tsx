@@ -22,12 +22,10 @@ export const EmbedDataproductModal: React.FC<EmbedDataproductModalProps> = ({
   const iframeSnippet = `<div style="margin:2rem 0;border-radius:5px;border:1px solid #1b3829;background:#0b1a13;overflow:hidden;font-family:'Inter',-apple-system,sans-serif;font-variant-numeric:tabular-nums;">
   <div style="background:#162f23;border-bottom:1px solid #1b3829;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-      <div style="width:28px;height:28px;border-radius:4px;background:#f59e0b;color:#060e0a;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;">
-        LA
-      </div>
+      <img src="${currentOrigin}/logo-osl.webp" alt="Onafhankelijk Steenwijkerland" style="width:28px;height:28px;border-radius:4px;background:#f5f6f4;padding:2px;object-fit:contain;" />
       <div style="min-width:0;">
         <h4 style="margin:0;font-size:13px;font-weight:700;color:#f5f6f4;">Steenwijkerland Luchtverkeer Radar (GM1708)</h4>
-        <p style="margin:0;font-size:11px;color:#9bb0a4;">Dataproduct van Lijst van Andel</p>
+        <p style="margin:0;font-size:11px;color:#9bb0a4;">Dataproduct van Onafhankelijk Steenwijkerland</p>
       </div>
     </div>
     <a href="${embedUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;font-size:12px;font-weight:700;border-radius:4px;background:#f59e0b;color:#060e0a;text-decoration:none;">
@@ -39,17 +37,17 @@ export const EmbedDataproductModal: React.FC<EmbedDataproductModalProps> = ({
     width="100%"
     height="${selectedHeight}"
     style="border:0;width:100%;height:${selectedHeight}px;display:block;"
-    title="Steenwijkerland Luchtverkeer Radar — Dataproduct van Lijst van Andel"
+    title="Steenwijkerland Luchtverkeer Radar — Dataproduct van Onafhankelijk Steenwijkerland"
     loading="lazy"
     allowfullscreen
   ></iframe>
   <div style="background:#060e0a;border-top:1px solid #1b3829;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#60756a;">
-    <span style="font-weight:600;color:#f59e0b;">Dataproduct van Lijst van Andel</span>
+    <span style="font-weight:600;color:#f59e0b;">Dataproduct van Onafhankelijk Steenwijkerland</span>
     <span>Live &amp; Historisch Luchtverkeer GM1708 · adsb.fi &amp; PDOK</span>
   </div>
 </div>`;
 
-  const simpleIframeSnippet = `<iframe src="${embedUrl}" width="100%" height="${selectedHeight}" style="border:1px solid #1b3829; border-radius:5px; overflow:hidden;" title="Steenwijkerland Luchtverkeer Radar — Dataproduct van Lijst van Andel" allowfullscreen></iframe>`;
+  const simpleIframeSnippet = `<iframe src="${embedUrl}" width="100%" height="${selectedHeight}" style="border:1px solid #1b3829; border-radius:5px; overflow:hidden;" title="Steenwijkerland Luchtverkeer Radar — Dataproduct van Onafhankelijk Steenwijkerland" allowfullscreen></iframe>`;
 
   const handleCopy = (text: string) => {
     if (navigator.clipboard) {
@@ -78,8 +76,7 @@ export const EmbedDataproductModal: React.FC<EmbedDataproductModalProps> = ({
                 Luchtverkeer Radar Insluiten
               </h2>
               <p className="text-xs text-[var(--text-muted)]">
-                Lijst van Andel · Responsive HTML/Iframe embed voor swl.scientiarum.nl en
-                nieuwswebsites
+                Dataproduct van Onafhankelijk Steenwijkerland · Responsive HTML/Iframe embed voor nieuwswebsites
               </p>
             </div>
           </div>

@@ -322,6 +322,7 @@ export default function App() {
             onSelectPassage={(id) => setSelectedPassageId(id)}
             health={liveRadar.health}
             historyVersion={historySync.historyVersion}
+            onSwitchToLive={() => handleChangeMode('live')}
             onSwitchToPreview={() => setFeedMode('demo')}
             onSwitchToHistory={() => handleChangeMode('history')}
           />
@@ -360,6 +361,7 @@ export default function App() {
           totalMatched={historicalReplay.totalMatched}
           truncated={historicalReplay.truncated}
           isLoading={historicalReplay.isLoading}
+          onSwitchToLive={() => handleChangeMode('live')}
         />
       )}
 

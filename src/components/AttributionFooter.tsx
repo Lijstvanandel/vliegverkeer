@@ -13,11 +13,13 @@ export const AttributionFooter: React.FC<AttributionFooterProps> = ({
   return (
     <footer className="min-h-7 py-1 px-3 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--text-muted)] shrink-0 z-30 tabular-nums">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="inline-flex items-center justify-center w-4 h-4 rounded-[3px] bg-[var(--accent-gold)] text-[#060e0a] font-extrabold text-[9px] shrink-0">
-          LA
-        </span>
+        <img
+          src="/logo-osl.webp"
+          alt="Onafhankelijk Steenwijkerland"
+          className="w-4.5 h-4.5 rounded-[3px] bg-[#f5f6f4] object-contain shrink-0"
+        />
         <span className="font-bold text-[var(--text-main)] whitespace-nowrap">
-          Dataproduct van Lijst van Andel
+          Dataproduct van Onafhankelijk Steenwijkerland
         </span>
         <span className="hidden lg:inline text-[var(--text-dim)]">·</span>
         <span className="hidden md:inline text-[10px] text-[var(--text-muted)] truncate">
