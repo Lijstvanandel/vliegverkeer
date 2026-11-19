@@ -6,6 +6,15 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { RadarDatabase } from './src/server/radarDb';
 import { RadarWorker } from './src/server/radarWorker';
+import {
+  AuthenticatedOslRequest,
+  OSL_LOGOUT_API_URL,
+  OSL_TOKEN_URL,
+  OSL_USERINFO_URL,
+  extractBearerToken,
+  requireOslExportAuth,
+  verifyOslAccessToken,
+} from './src/server/oslAuth';
 import { StatsPeriod, TrafficCategory } from './src/types/radar';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -177,26 +186,164 @@ async function startServer() {
     }
   });
 
-  // 6. CSV Export passages
-  app.get('/api/radar/export.csv', (req, res) => {
+  // 5c. OSL SSO Auth Proxy endpoints (voorkomt browser CORS bij token-omwisseling & sessiecheck)
+  app.post('/api/auth/osl/token', async (req, res) => {
     try {
-      const p = String(req.query.period || 'day');
-      const period = (
-        ['hour', 'day', 'week', 'weeknum', 'all'].includes(p) ? p : 'day'
-      ) as StatsPeriod;
-      const weekKey = req.query.week ? String(req.query.week) : null;
-      const csv = radarDb.exportPassagesCSV(period, weekKey);
-      const suffix = period === 'weeknum' && weekKey ? `week-${weekKey}` : period;
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="steenwijkerland-luchtverkeer-${suffix}-${new Date().toISOString().slice(0, 10)}.csv"`
-      );
-      res.send(csv);
+      const body = req.body || {};
+      const grantType = String(body.grant_type || 'authorization_code');
+      const clientId = String(body.client_id || 'vliegverkeer-radar');
+
+      const payload: Record<string, string> = {
+        grant_type: grantType,
+        client_id: clientId,
+      };
+      if (grantType === 'authorization_code') {
+        if (!body.code || !body.code_verifier || !body.redirect_uri) {
+          return res.status(400).json({
+            error: 'code, code_verifier en redirect_uri zijn verplicht',
+          });
+        }
+        payload.code = String(body.code);
+        payload.code_verifier = String(body.code_verifier);
+        payload.redirect_uri = String(body.redirect_uri);
+      } else if (grantType === 'refresh_token') {
+        if (!body.refresh_token) {
+          return res.status(400).json({ error: 'refresh_token ontbreekt' });
+        }
+        payload.refresh_token = String(body.refresh_token);
+      } else {
+        return res.status(400).json({ error: 'Niet-ondersteund grant_type' });
+      }
+
+      const upstreamRes = await fetch(OSL_TOKEN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const rawText = await upstreamRes.text();
+      let parsed: any = {};
+      try {
+        parsed = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        parsed = { error: rawText || `Token endpoint HTTP ${upstreamRes.status}` };
+      }
+
+      return res.status(upstreamRes.status).json(parsed);
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'CSV export mislukt' });
+      return res.status(502).json({
+        error: err?.message || 'Kan centrale OSL SSO-server niet bereiken voor token-omwisseling',
+      });
     }
   });
+
+  app.get('/api/auth/osl/me', async (req, res) => {
+    const token = extractBearerToken(req);
+    if (!token) {
+      return res.status(401).json({ authenticated: false, error: 'Geen Bearer token' });
+    }
+    const verified = await verifyOslAccessToken(token);
+    if (!verified.ok) {
+      return res.status(verified.status).json({
+        authenticated: false,
+        error: verified.error,
+      });
+    }
+
+    let userInfo = verified.claims || {};
+    if (!userInfo.email && !userInfo.name && !userInfo.username) {
+      try {
+        const uiRes = await fetch(OSL_USERINFO_URL, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        });
+        if (uiRes.ok) {
+          const uiJson = (await uiRes.json()) as Record<string, any>;
+          userInfo = { ...userInfo, ...(uiJson.user || uiJson) };
+        }
+      } catch {}
+    }
+
+    return res.json({
+      authenticated: true,
+      method: verified.method,
+      scopes: verified.scopes || [],
+      user: userInfo,
+    });
+  });
+
+  app.post('/api/auth/osl/logout', async (req, res) => {
+    try {
+      const token = extractBearerToken(req);
+      const refreshToken = req.body?.refresh_token ? String(req.body.refresh_token) : null;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      await fetch(OSL_LOGOUT_API_URL, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(refreshToken ? { refresh_token: refreshToken } : {}),
+      }).catch(() => {});
+    } catch {}
+    return res.json({ ok: true });
+  });
+
+  // 6. CSV Export passages (beveiligd met OSL SSO Bearer token + scope export:csv)
+  app.get(
+    '/api/radar/export.csv',
+    requireOslExportAuth('export:csv'),
+    (req: AuthenticatedOslRequest, res) => {
+      try {
+        const p = String(req.query.period || 'day');
+        const period = (
+          ['hour', 'day', 'week', 'weeknum', 'all'].includes(p) ? p : 'day'
+        ) as StatsPeriod;
+        const weekKey = req.query.week ? String(req.query.week) : null;
+        const csv = radarDb.exportPassagesCSV(period, weekKey);
+        const suffix = period === 'weeknum' && weekKey ? `week-${weekKey}` : period;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="steenwijkerland-luchtverkeer-${suffix}-${new Date().toISOString().slice(0, 10)}.csv"`
+        );
+        res.setHeader('Cache-Control', 'no-store');
+        res.send(csv);
+      } catch (err: any) {
+        res.status(500).json({ error: err?.message || 'CSV export mislukt' });
+      }
+    }
+  );
+
+  // 6b. JSON Export passages (beveiligd met OSL SSO Bearer token + scope export:json)
+  app.get(
+    '/api/radar/export.json',
+    requireOslExportAuth('export:json'),
+    (req: AuthenticatedOslRequest, res) => {
+      try {
+        const p = String(req.query.period || 'day');
+        const period = (
+          ['hour', 'day', 'week', 'weeknum', 'all'].includes(p) ? p : 'day'
+        ) as StatsPeriod;
+        const weekKey = req.query.week ? String(req.query.week) : null;
+        const payload = radarDb.exportPassagesJSON(period, weekKey);
+        const suffix = period === 'weeknum' && weekKey ? `week-${weekKey}` : period;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="steenwijkerland-luchtverkeer-${suffix}-${new Date().toISOString().slice(0, 10)}.json"`
+        );
+        res.setHeader('Cache-Control', 'no-store');
+        res.send(JSON.stringify(payload, null, 2));
+      } catch (err: any) {
+        res.status(500).json({ error: err?.message || 'JSON export mislukt' });
+      }
+    }
+  );
 
   // 7. Persistente Backup & Restore API (IndexedDB / Cloud snapshot synchronisatie)
   app.get('/api/radar/backup', (req, res) => {

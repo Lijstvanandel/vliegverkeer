@@ -20,9 +20,18 @@ import {
   TRAFFIC_CATEGORY_LABELS,
 } from '../lib/geoUtils';
 import {
+  ExportFormat,
+  OslUserProfile,
+  PendingDatasetExport,
+  buildOslLogoutUiUrl,
+} from '../lib/oslAuth';
+import {
   X,
   BarChart3,
   Download,
+  FileJson,
+  Lock,
+  ShieldCheck,
   Plane,
   Radio,
   ArrowUpDown,
@@ -34,6 +43,7 @@ import {
   DatabaseBackup,
   RefreshCw,
   LogOut,
+  LogIn,
   TrendingDown,
   TrendingUp,
   Building2,
@@ -54,6 +64,16 @@ interface AirspaceStatsModalProps {
   onCloudSignIn?: () => void;
   onCloudSignOut?: () => void;
   onCloudSyncNow?: () => void;
+  oslUser?: OslUserProfile | null;
+  isOslAuthenticated?: boolean;
+  isOslAuthenticating?: boolean;
+  oslAuthError?: string | null;
+  pendingOslExport?: PendingDatasetExport | null;
+  onClearPendingOslExport?: () => void;
+  onOslLogin?: (pendingExport?: PendingDatasetExport | null) => void | Promise<void>;
+  onOslLogout?: () => void | Promise<void>;
+  onGetOslAccessToken?: () => Promise<string | null>;
+  onInvalidateOslSession?: () => void;
 }
 
 const ICAO_TYPE_LABELS: Record<string, string> = {
@@ -367,11 +387,23 @@ export const AirspaceStatsModal: React.FC<AirspaceStatsModalProps> = ({
   onCloudSignIn,
   onCloudSignOut,
   onCloudSyncNow,
+  oslUser = null,
+  isOslAuthenticated = false,
+  isOslAuthenticating = false,
+  oslAuthError = null,
+  pendingOslExport = null,
+  onClearPendingOslExport,
+  onOslLogin,
+  onOslLogout,
+  onGetOslAccessToken,
+  onInvalidateOslSession,
 }) => {
   const [period, setPeriod] = useState<StatsPeriod>('day');
   const [selectedWeekKey, setSelectedWeekKey] = useState<string>('');
   const [stats, setStats] = useState<AirspaceStatsResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -422,6 +454,142 @@ export const AirspaceStatsModal: React.FC<AirspaceStatsModalProps> = ({
     };
   }, [isOpen, period, selectedWeekKey, feedMode, historyVersion]);
 
+  const triggerBrowserBlobDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const executeDatasetExport = async (
+    format: ExportFormat,
+    targetPeriod: StatsPeriod,
+    targetWeekKey: string | null,
+    targetFeedMode: FeedMode
+  ) => {
+    setExportError(null);
+
+    const token = onGetOslAccessToken ? await onGetOslAccessToken() : null;
+    if (!token) {
+      await onOslLogin?.({
+        format,
+        period: targetPeriod,
+        weekKey: targetWeekKey,
+        feedMode: targetFeedMode,
+      });
+      return;
+    }
+
+    if (targetFeedMode === 'demo') {
+      const demo = getDemoStats(targetPeriod, targetWeekKey || null);
+      const suffix =
+        targetPeriod === 'weeknum' && (targetWeekKey || demo.weekKey)
+          ? `week-${targetWeekKey || demo.weekKey}`
+          : targetPeriod;
+      if (format === 'json') {
+        const jsonPayload = {
+          exported_at: new Date().toISOString(),
+          source: 'Dataproduct van Onafhankelijk Steenwijkerland · Preview-modus',
+          period: targetPeriod,
+          week_key: demo.weekKey,
+          total_passages: demo.rows.length,
+          passages: demo.rows,
+        };
+        const blob = new Blob([JSON.stringify(jsonPayload, null, 2)], {
+          type: 'application/json;charset=utf-8;',
+        });
+        triggerBrowserBlobDownload(blob, `steenwijkerland-luchtverkeer-preview-${suffix}.json`);
+      } else {
+        const header =
+          'Passage ID;ICAO24;Callsign;Registratie;Model;Operator;Categorie;Intrede;Uittrede;Min Hoogte m;Max Hoogte m;Herkomst;Bestemming\r\n';
+        const lines = demo.rows.map((p) =>
+          [
+            p.id,
+            p.icao24,
+            p.callsign || '',
+            p.registration || '',
+            p.model_name || '',
+            p.operator_name || '',
+            p.traffic_category,
+            p.entry_time,
+            p.exit_time || 'Actief',
+            p.min_alt_m ?? '',
+            p.max_alt_m ?? '',
+            p.dep_iata || p.dep_icao || '',
+            p.arr_iata || p.arr_icao || '',
+          ].join(';')
+        );
+        const blob = new Blob(['\uFEFF' + header + lines.join('\r\n')], {
+          type: 'text/csv;charset=utf-8;',
+        });
+        triggerBrowserBlobDownload(blob, `steenwijkerland-luchtverkeer-preview-${suffix}.csv`);
+      }
+      return;
+    }
+
+    setExportingFormat(format);
+    try {
+      const params = new URLSearchParams({ period: targetPeriod });
+      if (targetPeriod === 'weeknum' && targetWeekKey) {
+        params.set('week', targetWeekKey);
+      }
+
+      const endpoint = format === 'json' ? '/api/radar/export.json' : '/api/radar/export.csv';
+      const res = await fetch(`${endpoint}?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (res.status === 401) {
+        onInvalidateOslSession?.();
+        await onOslLogin?.({
+          format,
+          period: targetPeriod,
+          weekKey: targetWeekKey,
+          feedMode: targetFeedMode,
+        });
+        return;
+      }
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson?.error || `Export mislukt (HTTP ${res.status})`);
+      }
+
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') || '';
+      const fnMatch = /filename="?([^";]+)"?/i.exec(cd);
+      const suffix =
+        targetPeriod === 'weeknum' && targetWeekKey ? `week-${targetWeekKey}` : targetPeriod;
+      const fallbackName = `steenwijkerland-luchtverkeer-${suffix}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.${format}`;
+      triggerBrowserBlobDownload(blob, fnMatch?.[1] || fallbackName);
+    } catch (err: any) {
+      setExportError(err?.message || 'Dataset-export mislukt');
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  // Start automatisch een uitgestelde export direct zodra OSL SSO callback voltooid is
+  useEffect(() => {
+    if (!isOpen || !pendingOslExport || !isOslAuthenticated) return;
+    const queued = pendingOslExport;
+    onClearPendingOslExport?.();
+    setPeriod(queued.period);
+    if (queued.weekKey) {
+      setSelectedWeekKey(queued.weekKey);
+    }
+    void executeDatasetExport(queued.format, queued.period, queued.weekKey, queued.feedMode);
+  }, [isOpen, pendingOslExport, isOslAuthenticated]);
+
   if (!isOpen) return null;
 
   const handleFollowFlight = (passage: FlightPassage) => {
@@ -429,48 +597,15 @@ export const AirspaceStatsModal: React.FC<AirspaceStatsModalProps> = ({
     onClose();
   };
 
-  const handleDownloadCsv = () => {
-    if (feedMode === 'live') {
-      const params = new URLSearchParams({ period });
-      if (period === 'weeknum' && (selectedWeekKey || stats?.weekKey)) {
-        params.set('week', selectedWeekKey || stats?.weekKey || '');
-      }
-      window.location.href = `/api/radar/export.csv?${params.toString()}`;
-      return;
-    }
-    if (!stats) return;
-    const header =
-      'Passage ID;ICAO24;Callsign;Registratie;Model;Operator;Categorie;Intrede;Uittrede;Min Hoogte m;Max Hoogte m;Herkomst;Bestemming\r\n';
-    const lines = stats.recentPassages.map((p) =>
-      [
-        p.id,
-        p.icao24,
-        p.callsign || '',
-        p.registration || '',
-        p.model_name || '',
-        p.operator_name || '',
-        p.traffic_category,
-        p.entry_time,
-        p.exit_time || 'Actief',
-        p.min_alt_m ?? '',
-        p.max_alt_m ?? '',
-        p.dep_iata || p.dep_icao || '',
-        p.arr_iata || p.arr_icao || '',
-      ].join(';')
-    );
-    const blob = new Blob(['\uFEFF' + header + lines.join('\r\n')], {
-      type: 'text/csv;charset=utf-8;',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const suffix = period === 'weeknum' && stats.weekKey ? `week-${stats.weekKey}` : period;
-    a.download = `steenwijkerland-luchtverkeer-preview-${suffix}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleExportClick = (format: ExportFormat) => {
+    const resolvedWeek =
+      period === 'weeknum' ? selectedWeekKey || stats?.weekKey || null : null;
+    void executeDatasetExport(format, period, resolvedWeek, feedMode);
   };
 
   const availableWeeks = stats?.availableWeeks || [];
+  const oslDisplayName =
+    oslUser?.name || oslUser?.username || oslUser?.email || oslUser?.sub || 'OSL Account';
 
   return (
     <div
@@ -497,15 +632,51 @@ export const AirspaceStatsModal: React.FC<AirspaceStatsModalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handleDownloadCsv}
-              className="px-3 py-1.5 rounded-[4px] bg-[var(--accent-gold)] hover:bg-[var(--accent-gold-bright)] text-[#060e0a] text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              onClick={() => handleExportClick('csv')}
+              disabled={isOslAuthenticating || exportingFormat !== null}
+              className="px-3 py-1.5 rounded-[4px] bg-[var(--accent-gold)] hover:bg-[var(--accent-gold-bright)] text-[#060e0a] text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition-colors"
+              title={
+                isOslAuthenticated
+                  ? 'Download volledige dataset als .CSV'
+                  : 'Log eenmalig in via OSL SSO en download direct .CSV'
+              }
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Download .CSV</span>
+              {!isOslAuthenticated ? (
+                <Lock className="w-3.5 h-3.5" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              <span>
+                {exportingFormat === 'csv'
+                  ? 'CSV laden...'
+                  : isOslAuthenticating
+                  ? 'Inloggen...'
+                  : 'Download .CSV'}
+              </span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => handleExportClick('json')}
+              disabled={isOslAuthenticating || exportingFormat !== null}
+              className="px-3 py-1.5 rounded-[4px] bg-[var(--bg-card)] hover:bg-[var(--bg-card-hover)] border border-[var(--border-focus)] text-[var(--text-main)] text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition-colors"
+              title={
+                isOslAuthenticated
+                  ? 'Download volledige dataset inclusief vliegsporen als .JSON'
+                  : 'Log eenmalig in via OSL SSO en download direct .JSON'
+              }
+            >
+              {!isOslAuthenticated ? (
+                <Lock className="w-3.5 h-3.5 text-[var(--accent-gold)]" />
+              ) : (
+                <FileJson className="w-3.5 h-3.5 text-[var(--status-blue)]" />
+              )}
+              <span>{exportingFormat === 'json' ? 'JSON laden...' : 'Download .JSON'}</span>
+            </button>
+
             <button
               type="button"
               onClick={onClose}
@@ -560,6 +731,83 @@ export const AirspaceStatsModal: React.FC<AirspaceStatsModalProps> = ({
               </select>
             </div>
           )}
+        </div>
+
+        {/* OSL SSO Statusbalk voor Dataset-export */}
+        <div className="px-5 py-2 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2 text-[11px] shrink-0">
+          <div className="flex items-center gap-2 text-[var(--text-muted)] min-w-0">
+            {isOslAuthenticated ? (
+              <>
+                <ShieldCheck className="w-3.5 h-3.5 text-[var(--status-emerald)] shrink-0" />
+                <span className="truncate">
+                  OSL SSO actief:{' '}
+                  <strong className="text-[var(--text-main)] font-mono">{oslDisplayName}</strong>
+                  {oslUser?.email && oslUser.email !== oslDisplayName && (
+                    <span className="text-[var(--text-dim)]"> ({oslUser.email})</span>
+                  )}
+                  {oslUser?.role && (
+                    <span className="ml-1.5 px-1.5 py-0.5 rounded-[3px] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[10px] font-mono text-[var(--accent-gold-bright)]">
+                      {oslUser.role}
+                    </span>
+                  )}
+                </span>
+              </>
+            ) : (
+              <>
+                <Lock className="w-3.5 h-3.5 text-[var(--accent-gold)] shrink-0" />
+                <span>
+                  Dataset-export (.CSV / .JSON) vereist eenmalig inloggen via{' '}
+                  <strong className="text-[var(--text-main)]">onafhankelijksteenwijkerland.nl</strong>
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {(oslAuthError || exportError) && (
+              <span className="text-[10px] text-[var(--status-crimson)] font-mono max-w-[320px] truncate" title={exportError || oslAuthError || ''}>
+                {exportError || oslAuthError}
+              </span>
+            )}
+            {isOslAuthenticated ? (
+              <>
+                <a
+                  href={buildOslLogoutUiUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => {
+                    void onOslLogout?.();
+                  }}
+                  className="px-2 py-1 rounded-[4px] bg-[var(--bg-main)] hover:bg-[var(--bg-card-hover)] border border-[var(--border-subtle)] text-[var(--text-dim)] hover:text-[var(--text-main)] text-[10px] font-semibold cursor-pointer"
+                  title="Log ook uit bij de centrale OSL SSO-server"
+                >
+                  Centrale uitlog
+                </a>
+                {onOslLogout && (
+                  <button
+                    type="button"
+                    onClick={() => void onOslLogout()}
+                    className="px-2 py-1 rounded-[4px] bg-[var(--bg-main)] hover:bg-[var(--status-crimson)]/20 border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] flex items-center gap-1 cursor-pointer font-semibold"
+                  >
+                    <LogOut className="w-3 h-3" />
+                    <span>Uitloggen</span>
+                  </button>
+                )}
+              </>
+            ) : (
+              onOslLogin && (
+                <button
+                  type="button"
+                  onClick={() => void onOslLogin(null)}
+                  disabled={isOslAuthenticating}
+                  className="px-2.5 py-1 rounded-[4px] bg-[var(--bg-elevated)] hover:bg-[var(--bg-card-hover)] border border-[var(--border-focus)] text-[var(--accent-gold-bright)] font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>{isOslAuthenticating ? 'OSL login open...' : 'Inloggen met OSL'}</span>
+                </button>
+              )
+            )}
+          </div>
         </div>
 
         {/* Persistente Historie-opslag & Optionele Cloud Backup */}

@@ -1534,6 +1534,42 @@ export class RadarDatabase {
     return '\uFEFF' + lines.join('\r\n');
   }
 
+  public exportPassagesJSON(period: StatsPeriod, weekKey?: string | null) {
+    const effectiveWeekKey =
+      period === 'weeknum' ? weekKey || this.getAvailableWeeks()[0]?.weekKey || null : null;
+    const bounds = this.resolvePeriodBounds(period, effectiveWeekKey);
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM flight_passages
+         WHERE entry_ms >= ? AND entry_ms <= ?
+         ORDER BY entry_ms DESC LIMIT 5000`
+      )
+      .all(bounds.minMs, bounds.maxMs) as any[];
+
+    const stmtPositions = this.db.prepare(
+      `SELECT * FROM flight_positions WHERE passage_id = ? ORDER BY recorded_ms ASC`
+    );
+
+    const passages: PassageWithTrack[] = rows.map((r) => {
+      const posRows = stmtPositions.all(r.id) as any[];
+      return {
+        passage: this.mapPassageRow(r),
+        positions: posRows.map((p) => this.mapPositionRow(p)),
+      };
+    });
+
+    return {
+      exported_at: new Date().toISOString(),
+      source: 'Dataproduct van Onafhankelijk Steenwijkerland · Luchtverkeer Radar (GM1708)',
+      period,
+      week_key: bounds.weekKey,
+      week_label: bounds.weekLabel,
+      total_passages: passages.length,
+      passages,
+    };
+  }
+
   public pruneOldPositions(retentionDays = 90) {
     const cutoffMs = Date.now() - retentionDays * 86_400_000;
     this.db.prepare(`DELETE FROM flight_positions WHERE recorded_ms < ?`).run(cutoffMs);

@@ -11,6 +11,7 @@ import { useMunicipalityBoundary } from './hooks/useMunicipalityBoundary';
 import { useLiveRadar } from './hooks/useLiveRadar';
 import { useHistoricalReplay } from './hooks/useHistoricalReplay';
 import { useHistorySync } from './hooks/useHistorySync';
+import { useOslAuth } from './hooks/useOslAuth';
 import { TopNavBar } from './components/TopNavBar';
 import { RadarMap } from './components/RadarMap';
 import {
@@ -113,6 +114,13 @@ export default function App() {
   const { boundary, adjacentBoundaries } = useMunicipalityBoundary();
   const liveRadar = useLiveRadar(mode === 'live', feedMode);
   const historySync = useHistorySync(feedMode, liveRadar.passages);
+  const oslAuth = useOslAuth(isEmbed);
+
+  useEffect(() => {
+    if (oslAuth.pendingExport) {
+      setIsStatsModalOpen(true);
+    }
+  }, [oslAuth.pendingExport]);
 
   const startIso = useMemo(
     () => new Date(historyRange.startMs).toISOString(),
@@ -389,6 +397,16 @@ export default function App() {
         onCloudSignIn={historySync.signInAndSync}
         onCloudSignOut={historySync.signOutCloud}
         onCloudSyncNow={historySync.syncNow}
+        oslUser={oslAuth.user}
+        isOslAuthenticated={oslAuth.isAuthenticated}
+        isOslAuthenticating={oslAuth.isAuthenticating}
+        oslAuthError={oslAuth.authError}
+        pendingOslExport={oslAuth.pendingExport}
+        onClearPendingOslExport={oslAuth.clearPendingExport}
+        onOslLogin={oslAuth.startLogin}
+        onOslLogout={oslAuth.logout}
+        onGetOslAccessToken={oslAuth.getValidAccessToken}
+        onInvalidateOslSession={oslAuth.invalidateSession}
       />
 
       <EmbedDataproductModal
