@@ -2,6 +2,7 @@ import { FeedMode, StatsPeriod } from '../types/radar';
 
 export const OSL_ISSUER = 'https://onafhankelijksteenwijkerland.nl';
 export const OSL_AUTHORIZE_URL = `${OSL_ISSUER}/authorize`;
+export const OSL_TOKEN_ENDPOINT = `${OSL_ISSUER}/api/auth/token`;
 export const OSL_LOGOUT_UI_URL = `${OSL_ISSUER}/sso/logout`;
 export const OSL_CLIENT_ID = 'vliegverkeer-radar';
 export const OSL_SCOPES = 'openid profile email export:csv export:json';
@@ -228,47 +229,70 @@ export async function buildOslAuthorizeUrl(options: {
   return `${OSL_AUTHORIZE_URL}?${params.toString()}`;
 }
 
+async function postOslTokenRequest(payload: Record<string, string>): Promise<any> {
+  const endpoints = ['/api/auth/osl/token', OSL_TOKEN_ENDPOINT];
+  let lastError = 'OSL token-omwisseling mislukt';
+
+  for (let i = 0; i < endpoints.length; i++) {
+    const url = endpoints[i];
+    const hasFallback = i < endpoints.length - 1;
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (netErr: any) {
+      if (hasFallback) continue;
+      throw new Error(netErr?.message || lastError);
+    }
+
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      return json;
+    }
+
+    // Als de lokale proxy-route niet aanwezig/bereikbaar is (404/405/502/503/504),
+    // val direct terug op het CORS-ondersteunde OSL token endpoint.
+    if (hasFallback && (res.status === 404 || res.status === 405 || res.status >= 500)) {
+      continue;
+    }
+
+    lastError =
+      json?.error_description ||
+      json?.error ||
+      `OSL token-omwisseling mislukt (HTTP ${res.status})`;
+    throw new Error(lastError);
+  }
+
+  throw new Error(lastError);
+}
+
 export async function exchangeOslAuthorizationCode(params: {
   code: string;
   codeVerifier: string;
   redirectUri: string;
 }): Promise<OslAuthSession> {
-  const res = await fetch('/api/auth/osl/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'authorization_code',
-      client_id: OSL_CLIENT_ID,
-      code: params.code,
-      code_verifier: params.codeVerifier,
-      redirect_uri: params.redirectUri,
-    }),
+  const json = await postOslTokenRequest({
+    grant_type: 'authorization_code',
+    client_id: OSL_CLIENT_ID,
+    code: params.code,
+    code_verifier: params.codeVerifier,
+    redirect_uri: params.redirectUri,
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(
-      json?.error_description || json?.error || `OSL token-omwisseling mislukt (HTTP ${res.status})`
-    );
-  }
   const session = normalizeTokenResponse(json);
   saveOslSession(session);
   return session;
 }
 
 export async function refreshOslAccessToken(refreshToken: string): Promise<OslAuthSession> {
-  const res = await fetch('/api/auth/osl/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'refresh_token',
-      client_id: OSL_CLIENT_ID,
-      refresh_token: refreshToken,
-    }),
+  const json = await postOslTokenRequest({
+    grant_type: 'refresh_token',
+    client_id: OSL_CLIENT_ID,
+    refresh_token: refreshToken,
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(json?.error_description || json?.error || 'Sessie vernieuwen mislukt');
-  }
   const session = normalizeTokenResponse(json);
   saveOslSession(session);
   return session;
